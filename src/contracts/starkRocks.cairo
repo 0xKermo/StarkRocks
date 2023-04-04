@@ -32,12 +32,7 @@ from src.contracts.lib.merkle.merkle import (
 )
 
 // CONSTANT
-const MAX_SUPPLY = 444;
-const WL_SUPPLY = 102;
-const TEAM_SUPPLY = 22;
-const PUBLIC_SUPPLY = 320;
-const PER_PUBLIC_ADDRESS = 1;
-const PER_WL_ADDRESS = 1;
+const MAX_SUPPLY = 650;
 
 // STRUCTS
 struct RoyalityInfo {
@@ -57,9 +52,22 @@ func Base_Uri_Len() -> (token_uri_len: felt) {
 @storage_var
 func Base_Uri_Extension() -> (extension: felt) {
 }
+// Base uri
+@storage_var
+func Contract_Uri(_id) -> (token_uri: felt) {
+}
+// Contract uri len
+@storage_var
+func Conract_Uri_Len() -> (token_uri_len: felt) {
+}
 // Mint price
 @storage_var
 func Mint_Price() -> (price: Uint256) {
+}
+
+// Mint price
+@storage_var
+func Public_Mint_Price() -> (price: Uint256) {
 }
 // Mint currency address
 @storage_var
@@ -104,20 +112,18 @@ func constructor{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr
     json_extension: felt,
     currency_address: felt,
     mint_price:Uint256,
+    public_mint_price:Uint256,
     root: felt,
-    wallet_addresses_len: felt,
-    wallet_addresses: felt*
-
 ) {
     ERC721.initializer(name, symbol);
     Ownable.initializer(owner);
     Base_Uri_Extension.write(json_extension);
     Currency_Address.write(currency_address);
     Mint_Price.write(mint_price);
+    Public_Mint_Price.write(public_mint_price);
     Merkle_Root.write(root);
     _set_base_uri(0,base_uri_len,base_uri);
     Base_Uri_Len.write(base_uri_len);
-    _teamMint(0, wallet_addresses_len, wallet_addresses);
     return ();
 }
 
@@ -219,6 +225,11 @@ func mintPrice{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
 }
 
 @view
+func publicMintPrice{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}() -> (price: Uint256) {
+    return Public_Mint_Price.read();
+}
+
+@view
 func currencyAddress{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}() -> (address: felt) {
     return Currency_Address.read();
 }
@@ -237,10 +248,10 @@ func baseUri{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}() 
 }
 
 @view
-func royalityInfo{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(_sale_price : Uint256) -> (receiver: felt, royalitytAmount: Uint256) {
+func royalityInfo{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(tokenId: Uint256 ,salePrice : Uint256) -> (receiver: felt, royalitytAmount: Uint256) {
     alloc_locals;
     let (royality_info) = Royality_Info.read();
-    let (royalty_amount: Uint256, _,_) =uint256_mul_div_mod(_sale_price, royality_info.royality_fee , Uint256(1000,0));
+    let (royalty_amount: Uint256, _,_) =uint256_mul_div_mod(salePrice, royality_info.royality_fee , Uint256(1000,0));
     return (royality_info.receiver, royalty_amount);
 }
 
@@ -352,7 +363,7 @@ func wlMint{pedersen_ptr: HashBuiltin*, syscall_ptr: felt*, range_check_ptr}(
 @external
 func publicMint{pedersen_ptr: HashBuiltin*, syscall_ptr: felt*, range_check_ptr}() {
     alloc_locals;
-    let (mintPrice) = Mint_Price.read();
+    let (mintPrice) = Public_Mint_Price.read();
     let (caller) = get_caller_address();
     let (thisAddress) = get_contract_address();
     let (supply) = Total_Supply.read();
@@ -362,16 +373,8 @@ func publicMint{pedersen_ptr: HashBuiltin*, syscall_ptr: felt*, range_check_ptr}
     let (currencyAddress) = Currency_Address.read();
     let (owner) = Ownable.owner();
 
-    with_attr error_message("Bot get out") {
-        assert orginalCaller.account_contract_address = caller;
-    }
-
     with_attr error_message("Mint not started") {
         assert publicMintState = TRUE;
-    }
-
-    with_attr error_message("Already minted") {
-        assert address_has_minted = FALSE;
     }
 
     with_attr error_message("MAX SUPPLY EXCEEDED") {
@@ -390,7 +393,6 @@ func publicMint{pedersen_ptr: HashBuiltin*, syscall_ptr: felt*, range_check_ptr}
 
     _mint(caller,supply + 1);
     Total_Supply.write(supply + 1);
-    Address_Has_Minted.write(caller, TRUE);
     return ();
 }
 
@@ -436,6 +438,16 @@ func set_base_uri{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_pt
 }
 
 @external
+func set_conract_uri{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
+    ipfs_uri_len:felt,ipfs_uri: felt*
+) {
+    Ownable.assert_only_owner();
+    Conract_Uri_Len.write(ipfs_uri_len);
+    _set_contract_uri(0,ipfs_uri_len,ipfs_uri);
+    return ();
+}
+
+@external
 func setTokenUriExtension{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     extension: felt
 ) {
@@ -464,6 +476,15 @@ func setMintPrice{pedersen_ptr: HashBuiltin*, syscall_ptr: felt*, range_check_pt
 ) {
     Ownable.assert_only_owner();
     Mint_Price.write(_price);
+    return ();
+}
+
+@external
+func setPublicMintPrice{pedersen_ptr: HashBuiltin*, syscall_ptr: felt*, range_check_ptr}(
+    _price: Uint256
+) {
+    Ownable.assert_only_owner();
+    Public_Mint_Price.write(_price);
     return ();
 }
 
@@ -596,6 +617,16 @@ func _set_base_uri{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_p
     }
     Base_Uri.write(index+1,ipfs_uri[index]);
     _set_base_uri(index = index+1, ipfs_uri_len =ipfs_uri_len ,ipfs_uri = ipfs_uri); 
+    return ();
+}
+
+func _set_contract_uri{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(index:felt, ipfs_uri_len: felt,ipfs_uri:felt*) {
+
+    if (ipfs_uri_len == index){
+        return ();
+    }
+    Base_Uri.write(index+1,ipfs_uri[index]);
+    _set_contract_uri(index = index+1, ipfs_uri_len =ipfs_uri_len ,ipfs_uri = ipfs_uri);
     return ();
 }
 
